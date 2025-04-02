@@ -2,6 +2,7 @@ package com.github.tvbox.osc.util;
 
 import android.app.Activity;
 import android.content.Context;
+import android.widget.Toast;
 
 import com.github.tvbox.osc.api.ApiConfig;
 import com.github.tvbox.osc.bean.IJKCode;
@@ -293,5 +294,19 @@ public class PlayerHelper {
             return (speed / 1024) + "Kb/s";
         else
             return speed > 0?speed + "B/s":"";
+    }
+
+    public static void enableDebug(Context context) {
+        Hawk.put(HawkConfig.DEBUG_OPEN, true);
+        Toast.makeText(context, "调试模式已启用，重启应用生效", Toast.LENGTH_SHORT).show();
+    }
+    
+    public static void disableDebug(Context context) {
+        Hawk.put(HawkConfig.DEBUG_OPEN, false);
+        Toast.makeText(context, "调试模式已关闭", Toast.LENGTH_SHORT).show();
+    }
+    
+    public static boolean isDebugOpen() {
+        return Hawk.get(HawkConfig.DEBUG_OPEN, false);
     }
 }

@@ -414,7 +414,6 @@ class SettingActivity : BaseVbActivity<ActivitySettingBinding>() {
         })
 
         mBinding.switchVideoPurify.setChecked(Hawk.get(HawkConfig.VIDEO_PURIFY, true))
-        // toggle purify video -------------------------------------
         mBinding.llVideoPurify.setOnClickListener { v: View? ->
             FastClickCheckUtil.check(v)
             val newConfig = !Hawk.get(HawkConfig.VIDEO_PURIFY, true)

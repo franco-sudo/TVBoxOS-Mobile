@@ -1,15 +1,17 @@
 package com.github.tvbox.osc.data;
 
 import android.database.Cursor;
+import android.database.sqlite.SQLiteDatabase;
 import android.database.sqlite.SQLiteException;
+import android.database.sqlite.SQLiteOpenHelper;
+import android.content.Context;
 
 import androidx.annotation.NonNull;
-import androidx.room.Room;
-import androidx.room.RoomDatabase;
-import androidx.room.migration.Migration;
-import androidx.sqlite.db.SupportSQLiteDatabase;
 
 import com.github.tvbox.osc.base.App;
+import com.github.tvbox.osc.data.dao.CacheDao;
+import com.github.tvbox.osc.data.dao.VodCollectDao;
+import com.github.tvbox.osc.data.dao.VodRecordDao;
 import com.github.tvbox.osc.util.FileUtils;
 
 import java.io.File;
@@ -26,9 +28,16 @@ public class AppDataManager {
     private static final int DB_FILE_VERSION = 3;
     private static final String DB_NAME = "tvbox";
     private static AppDataManager manager;
-    private static AppDataBase dbInstance;
+    private static SQLiteOpenHelper dbHelper;
+    
+    private CacheDao cacheDao;
+    private VodCollectDao vodCollectDao;
+    private VodRecordDao vodRecordDao;
 
     private AppDataManager() {
+        cacheDao = new CacheDao();
+        vodCollectDao = new VodCollectDao();
+        vodRecordDao = new VodRecordDao();
     }
 
     public static void init() {
@@ -36,111 +45,82 @@ public class AppDataManager {
             synchronized (AppDataManager.class) {
                 if (manager == null) {
                     manager = new AppDataManager();
+                    dbHelper = new CustomSQLiteOpenHelper(App.getInstance());
                 }
             }
         }
     }
-
-    static final Migration MIGRATION_1_2 = new Migration(1, 2) {
-        @Override
-        public void migrate(SupportSQLiteDatabase database) {
-            try {
-                database.execSQL("ALTER TABLE sourceState ADD COLUMN tidSort TEXT");
-            } catch (SQLiteException e) {
-                e.printStackTrace();
-            }
+    
+    public static AppDataManager get() {
+        if (manager == null) {
+            init();
         }
-    };
-
-    static final Migration MIGRATION_2_3 = new Migration(2, 3) {
-        @Override
-        public void migrate(SupportSQLiteDatabase database) {
-            database.execSQL("CREATE TABLE IF NOT EXISTS `vodRecordTmp` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `vodId` TEXT, `updateTime` INTEGER NOT NULL, `sourceKey` TEXT, `data` BLOB, `dataJson` TEXT, `testMigration` INTEGER NOT NULL)");
-
-            // Read every thing from the former Expense table
-            Cursor cursor = database.query("SELECT * FROM vodRecord");
-
-            int id;
-            int vodId;
-            long updateTime;
-            String sourceKey;
-            String dataJson;
-
-            while (cursor.moveToNext()) {
-                id = cursor.getInt(cursor.getColumnIndex("id"));
-                vodId = cursor.getInt(cursor.getColumnIndex("vodId"));
-                updateTime = cursor.getLong(cursor.getColumnIndex("updateTime"));
-                sourceKey = cursor.getString(cursor.getColumnIndex("sourceKey"));
-                dataJson = cursor.getString(cursor.getColumnIndex("dataJson"));
-                database.execSQL("INSERT INTO vodRecordTmp (id, vodId, updateTime, sourceKey, dataJson, testMigration) VALUES" +
-                        " ('" + id + "', '" + vodId + "', '" + updateTime + "', '" + sourceKey + "', '" + dataJson + "',0  )");
-            }
-
-
-            // Delete the former table
-            database.execSQL("DROP TABLE vodRecord");
-            // Rename the current table to the former table name so that all other code continues to work
-            database.execSQL("ALTER TABLE vodRecordTmp RENAME TO vodRecord");
-        }
-    };
-
-    static final Migration MIGRATION_3_4 = new Migration(3, 4) {
-        @Override
-        public void migrate(SupportSQLiteDatabase database) {
-            try {
-                database.execSQL("ALTER TABLE vodRecord ADD COLUMN dataJson TEXT");
-            } catch (SQLiteException e) {
-                e.printStackTrace();
-            }
-        }
-    };
-
-    static final Migration MIGRATION_4_5 = new Migration(4, 5) {
-        @Override
-        public void migrate(SupportSQLiteDatabase database) {
-            try {
-                database.execSQL("ALTER TABLE localSource ADD COLUMN type INTEGER NOT NULL DEFAULT 0");
-            } catch (SQLiteException e) {
-                e.printStackTrace();
-            }
-        }
-    };
-
-    static String dbPath() {
-        return DB_NAME + ".v" + DB_FILE_VERSION + ".db";
+        return manager;
     }
 
-    public static AppDataBase get() {
-        if (manager == null) {
-            throw new RuntimeException("AppDataManager is no init");
-        }
-        if (dbInstance == null)
-            dbInstance = Room.databaseBuilder(App.getInstance(), AppDataBase.class, dbPath())
-                    .setJournalMode(RoomDatabase.JournalMode.TRUNCATE)
-                    //.addMigrations(MIGRATION_1_2)
-                    //.addMigrations(MIGRATION_2_3)
-                    //.addMigrations(MIGRATION_3_4)
-                    //.addMigrations(MIGRATION_4_5)
-                    .addCallback(new RoomDatabase.Callback() {
-                        @Override
-                        public void onCreate(@NonNull SupportSQLiteDatabase db) {
-                            super.onCreate(db);
-//                        LOG.i("数据库第一次创建成功");
-                        }
+    public CacheDao getCacheDao() {
+        return cacheDao;
+    }
 
-                        @Override
-                        public void onOpen(@NonNull SupportSQLiteDatabase db) {
-                            super.onOpen(db);
-//                        LOG.i("数据库打开成功");
-                        }
-                    }).allowMainThreadQueries()//可以在主线程操作
-                    .build();
-        return dbInstance;
+    public VodCollectDao getVodCollectDao() {
+        return vodCollectDao;
+    }
+
+    public VodRecordDao getVodRecordDao() {
+        return vodRecordDao;
+    }
+
+    public static String dbPath() {
+        return DB_NAME;
+    }
+    
+    private static class CustomSQLiteOpenHelper extends SQLiteOpenHelper {
+        public CustomSQLiteOpenHelper(Context context) {
+            super(context, dbPath(), null, DB_FILE_VERSION);
+        }
+
+        @Override
+        public void onCreate(SQLiteDatabase db) {
+            // 创建所需的表
+            db.execSQL("CREATE TABLE IF NOT EXISTS cache (key TEXT PRIMARY KEY, data BLOB)");
+            db.execSQL("CREATE TABLE IF NOT EXISTS vodRecord (id INTEGER PRIMARY KEY AUTOINCREMENT, " +
+                    "vodId TEXT, updateTime INTEGER NOT NULL, sourceKey TEXT, dataJson TEXT)");
+            db.execSQL("CREATE TABLE IF NOT EXISTS vodCollect (id INTEGER PRIMARY KEY AUTOINCREMENT, " +
+                    "vodId TEXT, updateTime INTEGER NOT NULL, sourceKey TEXT, name TEXT, pic TEXT)");
+        }
+
+        @Override
+        public void onUpgrade(SQLiteDatabase db, int oldVersion, int newVersion) {
+            // 处理升级逻辑
+            try {
+                // 如果旧版本的数据库格式已经无法兼容，直接重建
+                db.execSQL("DROP TABLE IF EXISTS cache");
+                db.execSQL("DROP TABLE IF EXISTS vodRecord");
+                db.execSQL("DROP TABLE IF EXISTS vodCollect");
+                onCreate(db);
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+        }
+    }
+    
+    public static SQLiteDatabase getReadableDatabase() {
+        if (dbHelper == null) {
+            throw new RuntimeException("AppDataManager is not initialized");
+        }
+        return dbHelper.getReadableDatabase();
+    }
+    
+    public static SQLiteDatabase getWritableDatabase() {
+        if (dbHelper == null) {
+            throw new RuntimeException("AppDataManager is not initialized");
+        }
+        return dbHelper.getWritableDatabase();
     }
 
     public static boolean backup(File path) throws IOException {
-        if (dbInstance != null && dbInstance.isOpen()) {
-            dbInstance.close();
+        if (dbHelper != null) {
+            dbHelper.close();
         }
         File db = App.getInstance().getDatabasePath(dbPath());
         if (db.exists()) {
@@ -151,17 +131,21 @@ public class AppDataManager {
         }
     }
 
-    public static boolean restore(File path) throws IOException {
-        if (dbInstance != null && dbInstance.isOpen()) {
-            dbInstance.close();
+    public static boolean restore(File path) throws Exception {
+        if (dbHelper != null) {
+            dbHelper.close();
         }
         File db = App.getInstance().getDatabasePath(dbPath());
-        if (db.exists()) {
-            db.delete();
+        if (path.exists()) {
+            FileUtils.copyFile(path, db);
+            dbHelper = new CustomSQLiteOpenHelper(App.getInstance());
+            return true;
+        } else {
+            throw new Exception("备份文件不存在");
         }
-        if (!db.getParentFile().exists())
-            db.getParentFile().mkdirs();
-        FileUtils.copyFile(path, db);
-        return true;
+    }
+
+    public static String getDbFilePath() {
+        return App.getInstance().getDatabasePath(dbPath()).getPath();
     }
 }

@@ -1,6 +1,16 @@
 package com.github.tvbox.osc.base;
 
+import android.app.Activity;
+import android.app.Application;
+import android.content.BroadcastReceiver;
+import android.content.Context;
+import android.content.Intent;
+import android.content.IntentFilter;
+import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.text.TextUtils;
+import android.widget.Toast;
 
 import androidx.multidex.MultiDexApplication;
 
@@ -11,8 +21,11 @@ import com.github.tvbox.osc.bean.VodInfo;
 import com.github.tvbox.osc.callback.EmptyCallback;
 import com.github.tvbox.osc.callback.LoadingCallback;
 import com.github.tvbox.osc.data.AppDataManager;
+import com.github.tvbox.osc.data.AppDataBase;
 import com.github.tvbox.osc.server.ControlManager;
 import com.github.tvbox.osc.ui.activity.MainActivity;
+import com.github.tvbox.osc.util.AppManager;
+import com.github.tvbox.osc.util.EpgNameFuzzyMatch;
 import com.github.tvbox.osc.util.EpgUtil;
 import com.github.tvbox.osc.util.FileUtils;
 import com.github.tvbox.osc.util.HawkConfig;
@@ -25,6 +38,7 @@ import com.orhanobut.hawk.Hawk;
 import com.p2p.P2PClass;
 import com.whl.quickjs.android.QuickJSLoader;
 
+import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -39,8 +53,10 @@ import me.jessyan.autosize.unit.Subunits;
  */
 public class App extends MultiDexApplication {
     private static App instance;
+    private static Handler mHandler;
 
     private static P2PClass p;
+    private static String[] modules = new String[]{"p2p_so", "p2pcore", "p2p", "thunder"};
     public static String burl;
 
     public boolean isNormalStart;
@@ -49,14 +65,31 @@ public class App extends MultiDexApplication {
     public void onCreate() {
         super.onCreate();
         instance = this;
+        mHandler = new Handler(Looper.getMainLooper());
+        
+        // 初始化Hawk
+        Hawk.init(this).build();
+        
         initParams();
+        // 广播
+        initReceiver();
         // OKGo
         OkGoHelper.init(); //台标获取
         EpgUtil.init();
         // 初始化Web服务器
         ControlManager.init(this);
         //初始化数据库
-        AppDataManager.init();
+        try {
+            // 删除旧的数据库文件
+            File dbFile = getDatabasePath(AppDataManager.dbPath());
+            if (dbFile.exists()) {
+                dbFile.delete();
+            }
+            AppDataManager.init();
+        } catch (Exception e) {
+            e.printStackTrace();
+            Toast.makeText(this, "数据库初始化失败，正在尝试修复", Toast.LENGTH_LONG).show();
+        }
         LoadSir.beginBuilder()
                 .addCallback(new EmptyCallback())
                 .addCallback(new LoadingCallback())
@@ -73,11 +106,18 @@ public class App extends MultiDexApplication {
         FileUtils.cleanPlayerCache();
         initCrashConfig();
         Utils.initTheme();
+        // 尝试加载 SO 库
+        for (String module : modules) {
+            try {
+                System.loadLibrary(module);
+            } catch (Throwable th) {
+                th.printStackTrace();
+            }
+        }
     }
 
     private void initParams() {
         // Hawk
-        Hawk.init(this).build();
         Hawk.put(HawkConfig.DEBUG_OPEN, false);
 
         putDefault(HawkConfig.HOME_REC, 0);                  //推荐: 0=豆瓣热播, 1=站点推荐
@@ -114,6 +154,13 @@ public class App extends MultiDexApplication {
     public void onTerminate() {
         super.onTerminate();
         JsLoader.load();
+        if (p != null) {
+            try {
+                p.P2Pdoxendhttpd();
+            } catch (Throwable e) {
+                e.printStackTrace();
+            }
+        }
     }
 
     private void putDefault(String key, Object value) {
@@ -155,6 +202,23 @@ public class App extends MultiDexApplication {
                 .errorDrawable(R.drawable.app_icon) //错误图标
                 .restartActivity(MainActivity.class) //重新启动后的activity
                 .apply();
+    }
+
+    private void initReceiver() {
+        // 注册广播接收器
+        IntentFilter intentFilter = new IntentFilter();
+        intentFilter.addAction("com.github.tvbox.osc.ACTION_DEBUG");
+        registerReceiver(new BroadcastReceiver() {
+            @Override
+            public void onReceive(Context context, Intent intent) {
+                String mode = intent.getStringExtra("mode");
+                if ("enable".equals(mode)) {
+                    PlayerHelper.enableDebug(context);
+                } else if ("disable".equals(mode)) {
+                    PlayerHelper.disableDebug(context);
+                }
+            }
+        }, intentFilter);
     }
 
 }

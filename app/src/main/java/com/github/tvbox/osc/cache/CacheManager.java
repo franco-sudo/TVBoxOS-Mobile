@@ -81,7 +81,7 @@ public class CacheManager {
     }
 
     public static Object getCache(String key) {
-        Cache cache = AppDataManager.get().getCacheDao().getCache(key);
+        Cache cache = AppDataManager.get().getCacheDao().getCacheObj(key);
         if (cache != null && cache.data != null) {
             return toObject(cache.data);
         }
